@@ -1,0 +1,5 @@
+# The workflows carry the conformance claim and the scheduled checks, so changes to them
+# are reviewed by the organization's owner (IMPLEMENTATIONS.md); everything else is the
+# maintainer's.
+/.github/ @markusmazurczak
+/SECURITY.md @markusmazurczak

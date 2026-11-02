@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "home-mandate-spec"
+version = "0.0.0"
+description = "Python implementation of the Home-Mandate Specification"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.14", "mypy>=1.18", "pip-audit>=2.9", "hypothesis>=6.140"]
+
+[project.urls]
+Specification = "https://github.com/home-mandate/spec"
+Homepage = "https://home-mandate.org/"
+
+# The release of the Home-Mandate Specification this implementation follows, and the
+# conformance classes it claims (SPEC-v0 section 8.1). The workflows run the test tool
+# of exactly this tag against these classes; add a class here once it passes.
+[tool.home-mandate]
+spec = "v0.1.0"
+classes = "evaluator"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/home_mandate_spec"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+packages = ["home_mandate_spec"]
+mypy_path = "src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

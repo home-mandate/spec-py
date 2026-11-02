@@ -1,0 +1,29 @@
+# Dependabot: version updates for what the nightly check in scheduled.yml does not cover
+# (pip-audit checks the Python dependencies for known vulnerabilities).
+version: 2
+updates:
+  # The pinned GitHub Actions. All updates of a week in one pull request, and only
+  # releases that are at least 7 days old.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+  # The Python dependencies, the same way.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      python:
+        patterns: ["*"]
+    commit-message:
+      prefix: chore

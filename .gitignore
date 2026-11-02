@@ -10,3 +10,4 @@ build/
 .hypothesis/
 report.json
 conformance-report*.json
+frozen.txt

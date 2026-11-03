@@ -147,8 +147,8 @@ def test_no_nan_or_infinity(text: str) -> None:
         "-1e9999999999999999999",
         "1e-9999999999999999999",
         "-1e-9999999999999999999",
-        "0e9999999999999999999",
-        "0e-9999999999999999999",
+        "0.5e9999999999999999999",
+        "0.0001e-9999999999999999999",
     ],
 )
 def test_unrepresentable_numbers_raise_ijson_error(literal: str, trap_invalid: bool) -> None:
@@ -358,3 +358,25 @@ def test_exact_int_does_not_expand_a_huge_exponent() -> None:
     assert exact_int(Decimal("1e999999999999999")) is None
     assert exact_int(Decimal("1e-999999999999999")) is None
     assert time.monotonic() - start < 1
+
+
+@pytest.mark.parametrize("trap_invalid", [True, False])
+@pytest.mark.parametrize(
+    "literal",
+    [
+        "0e9999999999999999999",
+        "0e-9999999999999999999",
+        "-0e9999999999999999999",
+        "0.000E+9999999999999999999",
+        "-0.0e-9999999999999999999",
+    ],
+)
+def test_zero_with_a_huge_exponent_is_zero(literal: str, trap_invalid: bool) -> None:
+    # SPEC-v0 section 3.2: numbers are canonicalized by their value.
+    with localcontext() as context:
+        context.traps[InvalidOperation] = trap_invalid
+        number = parse(literal)
+        assert isinstance(number, Decimal)
+        assert number.is_zero()
+        assert exact_int(number) == 0
+        assert parse('{"min": ' + literal + "}") == {"min": Decimal(0)}

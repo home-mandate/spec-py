@@ -6,8 +6,9 @@ The standard library's ``json`` accepts more than I-JSON: duplicate keys (the la
 UTF-32. ``parse`` rejects all of these and reads every number by its exact value.
 
 Numbers come back as ``decimal.Decimal``, built from the literal as written, so that ``10``,
-``10.0`` and ``1e1`` are the same value and fractions are kept exactly. Numbers outside
-Decimal's representable range are rejected rather than rounded or replaced by NaN.
+``10.0`` and ``1e1`` are the same value and fractions are kept exactly. A zero is read as
+zero whatever its exponent; any other number outside Decimal's representable range is rejected
+rather than rounded or replaced by NaN.
 Whether a number is allowed in a place (a mandate permits only integers up to 2^53 - 1, a
 request parameter that is not an integer is ``invalid_request``) is not decided here but by
 the code that reads the value; ``exact_int`` is the helper for it.
@@ -51,12 +52,17 @@ def _reject_constant(name: str) -> NoReturn:
 def _number(literal: str) -> Decimal:
     try:
         value = Decimal(literal)
-    except InvalidOperation as e:
-        raise IJSONError("number outside Decimal's representable range") from e
+    except InvalidOperation:
+        value = Decimal("NaN")
     # With InvalidOperation trapping disabled, Decimal returns NaN instead of raising.
-    if not value.is_finite():
-        raise IJSONError("number outside Decimal's representable range")
-    return value
+    if value.is_finite():
+        return value
+    # A zero is zero whatever its exponent (SPEC-v0 section 3.2: numbers by their value).
+    # Any other number outside the range is never an integer within 2^53 - 1, so no place
+    # in a mandate could accept it.
+    if not any(digit in "123456789" for digit in literal.partition("e")[0].partition("E")[0]):
+        return Decimal("-0") if literal.startswith("-") else Decimal(0)
+    raise IJSONError("number outside Decimal's representable range")
 
 
 def _object(pairs: list[tuple[str, JSONValue]]) -> JSONValue:

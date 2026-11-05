@@ -57,11 +57,14 @@ def test_json_white_space_around_the_value() -> None:
 
 def test_escapes_are_decoded() -> None:
     # Conformance d38: escaped slashes; d06: \u escapes.
-    assert parse('"https:\\/\\/example.org \\u00e9 \\ud83d\\ude00"') == "https://example.org é 😀"
+    assert (
+        parse('"https:\\/\\/example.org \\u00e9 \\ud83d\\ude00"')
+        == "https://example.org \u00e9 \U0001f600"
+    )
 
 
 def test_bytes_in_utf8() -> None:
-    assert parse('{"name": "é"}'.encode()) == {"name": "é"}
+    assert parse('{"name": "\u00e9"}'.encode()) == {"name": "\u00e9"}
 
 
 def test_a_large_integer_is_kept_exactly() -> None:
@@ -73,7 +76,7 @@ def test_a_large_integer_is_kept_exactly() -> None:
 
 
 def test_replacement_character_is_allowed() -> None:
-    assert parse('"\\ufffd"') == " "
+    assert parse('"\\ufffd"') == "\ufffd"
 
 
 # I-JSON: exactly one JSON value (SPEC-v0 section 3.1 item 1)
@@ -94,11 +97,11 @@ def test_replacement_character_is_allowed() -> None:
         ".5",
         "+1",
         "0x10",
-        "١",  # an Arabic-Indic digit is not a JSON digit
-        "﻿{}",  # conformance i116: a byte order mark is not JSON
+        "\u0661",  # an Arabic-Indic digit is not a JSON digit
+        "\ufeff{}",  # conformance i116: a byte order mark is not JSON
         '"a\u0001"',  # a raw control character inside a string
         '"\\x41"',
-        " {}",  # a no-break space is not JSON white space
+        "\u00a0{}",  # a no-break space is not JSON white space
     ],
 )
 def test_not_one_json_value(text: str) -> None:
@@ -242,7 +245,7 @@ def test_size_over_the_limit() -> None:
 
 
 def test_size_counts_bytes_not_characters() -> None:
-    text = '"' + "é" * 4 + '"'  # 6 characters, 10 bytes
+    text = '"' + "\u00e9" * 4 + '"'  # 6 characters, 10 bytes
     parse(text, max_bytes=10)
     with pytest.raises(IJSONError):
         parse(text, max_bytes=9)

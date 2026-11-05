@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 name: CI
 
-# Lint, types and tests for every push to a branch that is not main (main takes only
-# squash-merged pull requests, whose checks ran on the branch). The pull request itself
-# runs integration.yml.
+# Lint, types and tests for every push to a branch that is not main or release/X.Y (those
+# take only squash-merged pull requests, whose checks ran on the branch). The pull request
+# itself runs integration.yml.
 on:
   push:
-    branches-ignore: [main]
+    branches-ignore: [main, "release/[0-9]+.[0-9]+"]
   workflow_dispatch:
 
 permissions:

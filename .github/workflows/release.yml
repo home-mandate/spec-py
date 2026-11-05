@@ -1,14 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 name: Release
 
-# A tag vX.Y.Z or vX.Y.Z-rc.N on main publishes a GitHub release with the conformance
+# A tag vX.Y.Z, vX.Y.Z-alpha.N or vX.Y.Z-rc.N publishes a GitHub release with the conformance
 # report of that commit, attested by GitHub (actions/attest-build-provenance). The release
 # exists only if the report was produced: a tag whose conformance run fails publishes
 # nothing.
 #
 # Guards: tags are immutable (repository ruleset). Before anything runs, the tag must point
-# to a commit on main that came from a pull request whose checks all passed, match the
-# version in pyproject.toml, and the release must not exist yet.
+# to a commit on main, for a patch on release/X.Y (.github/scripts/release-base.sh), that came
+# from a pull request into that branch whose checks all passed, match the version in
+# pyproject.toml, and the release must not exist yet.
 on:
   push:
     tags: ["v*"]
@@ -35,7 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0 # main's history, to check where the tag points
+          fetch-depth: 0 # the branches' history, to check where the tag points
           persist-credentials: false
 
       - name: Tag, branch and version
@@ -44,31 +45,29 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          if ! [[ "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?)$ ]]; then
-            echo "::error::tag $TAG is neither vX.Y.Z nor vX.Y.Z-rc.N"; exit 1
-          fi
-          version="${BASH_REMATCH[1]}"
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-            echo "::error::$TAG points to a commit that is not on main"; exit 1
-          fi
+          base=$(bash .github/scripts/release-base.sh "$TAG" "$GITHUB_SHA")
+          version="${TAG#v}"
           project=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')
           if [ "$project" != "$version" ]; then
             echo "::error::pyproject.toml has version '$project', the tag $version"; exit 1
           fi
           prerelease=false
           if [[ "$version" == *-* ]]; then prerelease=true; fi
-          { echo "version=$version"; echo "prerelease=$prerelease"; } >> "$GITHUB_OUTPUT"
+          { echo "base=$base"; echo "version=$version"; echo "prerelease=$prerelease"; } >> "$GITHUB_OUTPUT"
 
-      # main takes squash-merged pull requests; their checks ran on the pull request's head.
+      # The branches take squash-merged pull requests; their checks ran on the pull request's
+      # head.
       - name: The pull request's checks passed
         env:
           GH_TOKEN: ${{ github.token }}
+          BASE: ${{ steps.version.outputs.base }}
         run: |
           set -euo pipefail
-          heads=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
-            --jq '[.[] | select(.merged_at != null and .base.ref == "main") | .head.sha] | unique | .[]')
+          heads=$(gh pr list --repo "$GITHUB_REPOSITORY" --base "$BASE" --state merged --limit 200 \
+            --json headRefOid,mergeCommit \
+            --jq "[.[] | select(.mergeCommit.oid == \"$GITHUB_SHA\") | .headRefOid] | unique | .[]")
           if [ "$(printf '%s\n' "$heads" | grep -c .)" != 1 ]; then
-            echo "::error::$GITHUB_SHA did not come from exactly one merged pull request into main"; exit 1
+            echo "::error::$GITHUB_SHA did not come from exactly one merged pull request into $BASE"; exit 1
           fi
           runs=$(gh api "repos/$GITHUB_REPOSITORY/commits/$heads/check-runs?per_page=100" \
             --jq '.check_runs[] | "\(.status)|\(.conclusion)|\(.name)"')

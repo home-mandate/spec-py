@@ -115,29 +115,37 @@ def _check_strings(value: JSONValue) -> None:
 
 
 def parse(
-    data: str | bytes, *, max_bytes: int | None = None, max_depth: int | None = None
+    data: str | bytes | bytearray,
+    *,
+    max_bytes: int | None = MAX_MANDATE_BYTES,
+    max_depth: int | None = MAX_DEPTH,
 ) -> JSONValue:
     """Reads exactly one JSON value from ``data`` and checks that it is I-JSON.
 
-    ``bytes`` must be UTF-8. A ``str`` is counted and checked in its UTF-8 encoding, so a
-    lone surrogate in it is rejected as invalid UTF-8. ``max_bytes`` bounds the size of that
-    encoding before anything is parsed, ``max_depth`` the nesting of arrays and objects.
+    ``bytes`` and ``bytearray`` must be UTF-8. A ``str`` is counted and checked in its UTF-8
+    encoding, so a lone surrogate in it is rejected as invalid UTF-8. ``max_bytes`` bounds the
+    size of that encoding before anything is parsed, ``max_depth`` the nesting of arrays and
+    objects. Both default to the limits of a mandate (SPEC-v0 section 3.1); ``None`` lifts a
+    limit, for input that may be larger, such as a line of the test interface that carries
+    a mandate.
 
     Raises ``IJSONError`` for any input that is not accepted, including numbers outside
     Decimal's representable range.
     """
-    if isinstance(data, bytes):
-        raw = data
+    if isinstance(data, (bytes, bytearray)):
+        raw = bytes(data)
         try:
             text = raw.decode("utf-8")
         except UnicodeDecodeError as e:
             raise IJSONError("not valid UTF-8") from e
-    else:
+    elif isinstance(data, str):
         text = data
         try:
             raw = text.encode("utf-8")
         except UnicodeEncodeError as e:
             raise IJSONError("not valid UTF-8") from e
+    else:
+        raise IJSONError(f"expected str or bytes, not {type(data).__name__}")
     if max_bytes is not None and len(raw) > max_bytes:
         raise IJSONError(f"larger than {max_bytes} bytes")
     if max_depth is not None:

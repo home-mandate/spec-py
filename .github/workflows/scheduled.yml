@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 name: Scheduled
 
-# Every night: the dependencies against the known vulnerabilities (pip-audit). On the 1st
-# and the 15th: long fuzzing of every target. A failure of a scheduled run opens an issue
-# in this repository, or comments on the open one.
+# Every night: the dependencies of main and the newest release/X.Y against the known
+# vulnerabilities (pip-audit). On the 1st and the 15th: long fuzzing of every target. A
+# failure of a scheduled run opens an issue in this repository, or comments on the open one.
 on:
   schedule:
     - cron: "5 2 * * *" # security, every night
@@ -21,14 +21,37 @@ permissions:
   contents: read
 
 jobs:
-  security:
-    name: Security (pip-audit)
+  # The newest release branch gets the same check: it only gets patches and no dependency
+  # updates, so a finding there is fixed like any other bug (RELEASING.md).
+  branches:
+    name: Branches to check
     if: github.event.schedule == '5 2 * * *' || inputs.what == 'security'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      refs: ${{ steps.list.outputs.refs }}
+    steps:
+      - id: list
+        run: |
+          set -euo pipefail
+          newest=$(git ls-remote --heads "https://github.com/$GITHUB_REPOSITORY" 'release/*' |
+            sed 's#.*refs/heads/##' | grep -E '^release/[0-9]+\.[0-9]+$' | sort -V | tail -n 1 || true)
+          echo "refs=$(jq -cn --arg newest "$newest" '["main"] + (if $newest == "" then [] else [$newest] end)')" >> "$GITHUB_OUTPUT"
+
+  security:
+    name: Security (pip-audit), ${{ matrix.ref }}
+    needs: branches
+    if: github.event.schedule == '5 2 * * *' || inputs.what == 'security'
+    strategy:
+      fail-fast: false
+      matrix:
+        ref: ${{ fromJSON(needs.branches.outputs.refs) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ matrix.ref }}
           persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
@@ -70,7 +93,7 @@ jobs:
 
   report:
     name: Report a failure
-    needs: [security, fuzz]
+    needs: [branches, security, fuzz]
     if: failure() && github.event_name == 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 5

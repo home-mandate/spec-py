@@ -51,10 +51,10 @@ ruff check . && mypy && pytest
 ```
 
 The checks of `ci.yml` run on every push to a branch, those of `integration.yml` on every
-pull request against `main` (conformance and short fuzzing, required to merge),
-`scheduled.yml` checks the dependencies every night and fuzzes for a long run on the 1st
-and the 15th, and a tag `vX.Y.Z` or `vX.Y.Z-rc.N` on `main` publishes a release with its
-conformance report (`release.yml`). The tools, the layout and everything else in this
+pull request against `main` or `release/X.Y` (conformance and short fuzzing, required to
+merge), `scheduled.yml` checks the dependencies every night and fuzzes for a long run on the
+1st and the 15th, and a tag publishes a release with its conformance report (`release.yml`,
+see [RELEASING.md](RELEASING.md)). The tools, the layout and everything else in this
 repository are the maintainer's choice.
 
 ## License

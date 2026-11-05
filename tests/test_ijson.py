@@ -68,10 +68,12 @@ def test_a_large_integer_is_kept_exactly() -> None:
     # The standard int conversion stops at 4300 digits; a Decimal does not.
     digits = "9" * 5000
     assert parse(digits) == Decimal(digits)
+    huge = "9" * (MAX_MANDATE_BYTES + 1)
+    assert parse(huge, max_bytes=None) == Decimal(huge)
 
 
 def test_replacement_character_is_allowed() -> None:
-    assert parse('"\\ufffd"') == "�"
+    assert parse('"\\ufffd"') == " "
 
 
 # I-JSON: exactly one JSON value (SPEC-v0 section 3.1 item 1)
@@ -272,7 +274,7 @@ def test_brackets_inside_strings_do_not_count() -> None:
 def test_very_deep_input_without_a_limit_is_an_error_not_a_crash() -> None:
     depth = 200_000
     with pytest.raises(IJSONError):
-        parse("[" * depth + "]" * depth)
+        parse("[" * depth + "]" * depth, max_depth=None)
 
 
 # exact_int: whether a number is an integer within the limit
@@ -380,3 +382,38 @@ def test_zero_with_a_huge_exponent_is_zero(literal: str, trap_invalid: bool) -> 
         assert number.is_zero()
         assert exact_int(number) == 0
         assert parse('{"min": ' + literal + "}") == {"min": Decimal(0)}
+
+
+# Defaults and input types
+
+
+def test_the_limits_of_a_mandate_apply_by_default() -> None:
+    with pytest.raises(IJSONError, match="larger than"):
+        parse(_string_of_bytes(MAX_MANDATE_BYTES + 1))
+    depth = MAX_DEPTH + 1
+    with pytest.raises(IJSONError, match="nesting"):
+        parse("[" * depth + "]" * depth)
+
+
+def test_none_lifts_a_limit() -> None:
+    parse(_string_of_bytes(MAX_MANDATE_BYTES + 1), max_bytes=None)
+    depth = MAX_DEPTH + 1
+    parse("[" * depth + "]" * depth, max_depth=None)
+
+
+def test_a_large_array_is_rejected_before_it_is_read() -> None:
+    # Without the default limit, a 10 MB array was read in full first.
+    with pytest.raises(IJSONError, match="larger than"):
+        parse("[" + "0," * 5_000_000 + "0]")
+
+
+def test_bytearray() -> None:
+    assert parse(bytearray(b'{"a": 1}')) == {"a": Decimal(1)}
+    with pytest.raises(IJSONError, match="UTF-8"):
+        parse(bytearray(b'"\xff"'))
+
+
+@pytest.mark.parametrize("data", [None, 1, [], {}, memoryview(b"{}")])
+def test_other_types_are_an_ijson_error(data: object) -> None:
+    with pytest.raises(IJSONError, match="expected str or bytes"):
+        parse(data)  # type: ignore[arg-type]

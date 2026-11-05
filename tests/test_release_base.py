@@ -3,9 +3,15 @@
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+
+# The script runs on the Linux runner of release.yml, where this test runs too. On Windows,
+# `bash` is often WSL's, which doesn't understand the paths. Only the platform decides, so that
+# the test can never be skipped in CI.
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="needs a POSIX bash and git")
 
 SCRIPT = Path(__file__).parent.parent / ".github" / "scripts" / "release-base.sh"
 GIT_ENV = {

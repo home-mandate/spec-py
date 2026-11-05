@@ -57,6 +57,9 @@ merge), `scheduled.yml` checks the dependencies every night and fuzzes for a lon
 see [RELEASING.md](RELEASING.md)). The tools, the layout and everything else in this
 repository are the maintainer's choice.
 
+Code in this repository is written with the help of AI tools and checked against the text of
+the specification and its conformance cases before it is merged.
+
 ## License
 
 Apache License 2.0, see [LICENSE](LICENSE). The name Home-Mandate and the logo are not

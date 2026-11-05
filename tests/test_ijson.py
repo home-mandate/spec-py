@@ -57,21 +57,26 @@ def test_json_white_space_around_the_value() -> None:
 
 def test_escapes_are_decoded() -> None:
     # Conformance d38: escaped slashes; d06: \u escapes.
-    assert parse('"https:\\/\\/example.org \\u00e9 \\ud83d\\ude00"') == "https://example.org é 😀"
+    assert (
+        parse('"https:\\/\\/example.org \\u00e9 \\ud83d\\ude00"')
+        == "https://example.org \u00e9 \U0001f600"
+    )
 
 
 def test_bytes_in_utf8() -> None:
-    assert parse('{"name": "é"}'.encode()) == {"name": "é"}
+    assert parse('{"name": "\u00e9"}'.encode()) == {"name": "\u00e9"}
 
 
 def test_a_large_integer_is_kept_exactly() -> None:
     # The standard int conversion stops at 4300 digits; a Decimal does not.
     digits = "9" * 5000
     assert parse(digits) == Decimal(digits)
+    huge = "9" * (MAX_MANDATE_BYTES + 1)
+    assert parse(huge, max_bytes=None) == Decimal(huge)
 
 
 def test_replacement_character_is_allowed() -> None:
-    assert parse('"\\ufffd"') == "�"
+    assert parse('"\\ufffd"') == "\ufffd"
 
 
 # I-JSON: exactly one JSON value (SPEC-v0 section 3.1 item 1)
@@ -92,11 +97,11 @@ def test_replacement_character_is_allowed() -> None:
         ".5",
         "+1",
         "0x10",
-        "١",  # an Arabic-Indic digit is not a JSON digit
-        "﻿{}",  # conformance i116: a byte order mark is not JSON
+        "\u0661",  # an Arabic-Indic digit is not a JSON digit
+        "\ufeff{}",  # conformance i116: a byte order mark is not JSON
         '"a\u0001"',  # a raw control character inside a string
         '"\\x41"',
-        " {}",  # a no-break space is not JSON white space
+        "\u00a0{}",  # a no-break space is not JSON white space
     ],
 )
 def test_not_one_json_value(text: str) -> None:
@@ -240,7 +245,7 @@ def test_size_over_the_limit() -> None:
 
 
 def test_size_counts_bytes_not_characters() -> None:
-    text = '"' + "é" * 4 + '"'  # 6 characters, 10 bytes
+    text = '"' + "\u00e9" * 4 + '"'  # 6 characters, 10 bytes
     parse(text, max_bytes=10)
     with pytest.raises(IJSONError):
         parse(text, max_bytes=9)
@@ -272,7 +277,7 @@ def test_brackets_inside_strings_do_not_count() -> None:
 def test_very_deep_input_without_a_limit_is_an_error_not_a_crash() -> None:
     depth = 200_000
     with pytest.raises(IJSONError):
-        parse("[" * depth + "]" * depth)
+        parse("[" * depth + "]" * depth, max_depth=None)
 
 
 # exact_int: whether a number is an integer within the limit
@@ -380,3 +385,38 @@ def test_zero_with_a_huge_exponent_is_zero(literal: str, trap_invalid: bool) -> 
         assert number.is_zero()
         assert exact_int(number) == 0
         assert parse('{"min": ' + literal + "}") == {"min": Decimal(0)}
+
+
+# Defaults and input types
+
+
+def test_the_limits_of_a_mandate_apply_by_default() -> None:
+    with pytest.raises(IJSONError, match="larger than"):
+        parse(_string_of_bytes(MAX_MANDATE_BYTES + 1))
+    depth = MAX_DEPTH + 1
+    with pytest.raises(IJSONError, match="nesting"):
+        parse("[" * depth + "]" * depth)
+
+
+def test_none_lifts_a_limit() -> None:
+    parse(_string_of_bytes(MAX_MANDATE_BYTES + 1), max_bytes=None)
+    depth = MAX_DEPTH + 1
+    parse("[" * depth + "]" * depth, max_depth=None)
+
+
+def test_a_large_array_is_rejected_before_it_is_read() -> None:
+    # Without the default limit, a 10 MB array was read in full first.
+    with pytest.raises(IJSONError, match="larger than"):
+        parse("[" + "0," * 5_000_000 + "0]")
+
+
+def test_bytearray() -> None:
+    assert parse(bytearray(b'{"a": 1}')) == {"a": Decimal(1)}
+    with pytest.raises(IJSONError, match="UTF-8"):
+        parse(bytearray(b'"\xff"'))
+
+
+@pytest.mark.parametrize("data", [None, 1, [], {}, memoryview(b"{}")])
+def test_other_types_are_an_ijson_error(data: object) -> None:
+    with pytest.raises(IJSONError, match="expected str or bytes"):
+        parse(data)  # type: ignore[arg-type]

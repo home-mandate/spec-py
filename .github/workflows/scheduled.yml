@@ -1,13 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 name: Scheduled
 
-# Every night: the dependencies of main and the newest release/X.Y against the known
-# vulnerabilities (pip-audit). On the 1st and the 15th: long fuzzing of every target. A
-# failure of a scheduled run opens an issue in this repository, or comments on the open one.
+# Checks that do not belong to one change:
+#   - every night: the dependencies of main and the newest release/X.Y against the known
+#     vulnerabilities (pip-audit), which become known without a commit.
+#   - Wednesday and Saturday: every fuzz target with the profile "long", starting from the
+#     examples earlier runs kept. Hypothesis keeps them in .hypothesis/, which goes into the
+#     Actions cache (unused entries are dropped after seven days, hence twice a week); pull
+#     requests and the release gate start from it.
+# Long fuzzing for a release belongs to the release candidate, not to a date (release.yml).
+# A failure opens an issue in this repository, or comments on the open one.
 on:
   schedule:
     - cron: "5 2 * * *" # security, every night
-    - cron: "29 3 1,15 * *" # fuzzing, twice a month
+    - cron: "29 3 * * 3,6" # fuzzing, Wednesday and Saturday
   workflow_dispatch:
     inputs:
       what:
@@ -63,7 +69,7 @@ jobs:
 
   fuzz:
     name: Fuzz (long)
-    if: github.event.schedule == '29 3 1,15 * *' || inputs.what == 'fuzz'
+    if: github.event.schedule == '29 3 * * 3,6' || inputs.what == 'fuzz'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -74,6 +80,12 @@ jobs:
         with:
           python-version: "3.13"
       - run: python -m pip install -e ".[dev]"
+      # The key never matches: the newest examples with the prefix are restored.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .hypothesis/
+          key: hypothesis-v1-${{ github.run_id }}
+          restore-keys: hypothesis-v1-
       - name: Fuzz targets present
         id: targets
         run: |
@@ -82,7 +94,12 @@ jobs:
       - if: steps.targets.outputs.present == 'true'
         run: pytest tests/fuzz
         env:
-          HYPOTHESIS_PROFILE: long # 45 minutes in all; the profile is defined in tests/fuzz/conftest.py
+          HYPOTHESIS_PROFILE: long # the profile is defined in tests/fuzz/conftest.py
+      - if: ${{ !cancelled() && steps.targets.outputs.present == 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .hypothesis/
+          key: hypothesis-v1-${{ github.run_id }}-${{ github.run_attempt }}
       # A failing example is kept in .hypothesis/ with its seed; keep it to reproduce.
       - if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -90,6 +107,7 @@ jobs:
           name: fuzz-failures
           path: .hypothesis/
           if-no-files-found: ignore
+          include-hidden-files: true
 
   report:
     name: Report a failure

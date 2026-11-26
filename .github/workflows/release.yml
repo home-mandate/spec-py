@@ -1,24 +1,42 @@
 # SPDX-License-Identifier: Apache-2.0
 name: Release
 
-# A tag vX.Y.Z, vX.Y.Z-alpha.N or vX.Y.Z-rc.N publishes a GitHub release with the conformance
+# A tag vX.Y.0-alpha.N, vX.Y.Z-rc.N or vX.Y.Z publishes a GitHub release with the conformance
 # report of that commit, attested by GitHub (actions/attest-build-provenance). The release
 # exists only if the report was produced: a tag whose conformance run fails publishes
 # nothing.
 #
-# Guards: tags are immutable (repository ruleset). Before anything runs, the tag must point
-# to a commit on main, for a patch on release/X.Y (.github/scripts/release-base.sh), that came
-# from a pull request into that branch whose checks all passed, match the version in
-# pyproject.toml, and the release must not exist yet.
+# A release is a tag, not a commit (RELEASING.md of the organization): pyproject.toml carries
+# X.Y.Z, and the conformance report names the version of the tag, X.Y.Z-rc.N for a release
+# candidate. A release candidate is tagged on release/X.Y, published, and then runs the
+# release gate: long fuzzing of every target. The version is tagged on the commit of a
+# release candidate whose gate passed; this workflow then publishes without testing again.
+#
+# Guards: only admins and the maintainer may create tags, and tags and releases are immutable
+# (repository settings). Before anything is published, home-mandate/.github/actions/release-verify
+# checks where the tag stands, that the commit came from a merged pull request whose checks
+# passed, that a version is a release candidate that passed, and that the release doesn't
+# exist. Here: the tag matches the version in pyproject.toml, and a version names a version of
+# the specification, not a release candidate.
+#
+# Run by hand with a tag name, the workflow only checks whether that tag could be released
+# from the head of the chosen branch, and publishes nothing. Do it before every tag:
+#   gh workflow run release.yml --ref release/X.Y -f tag=vX.Y.Z-rc.1
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Dry run: the tag to check on the head of this branch. Publishes nothing."
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -30,67 +48,53 @@ jobs:
       contents: read
       pull-requests: read # the pull request the commit came from
       checks: read # its checks
+      actions: read # the run of the release candidate a version stands on
     outputs:
-      version: ${{ steps.version.outputs.version }}
-      prerelease: ${{ steps.version.outputs.prerelease }}
+      version: ${{ steps.verify.outputs.version }}
+      kind: ${{ steps.verify.outputs.kind }}
+      prerelease: ${{ steps.verify.outputs.prerelease }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0 # the branches' history, to check where the tag points
+          fetch-depth: 0 # the branches' history and the tags, to check where the tag stands
           persist-credentials: false
 
-      - name: Tag, branch and version
-        id: version
+      - id: verify
+        uses: home-mandate/.github/actions/release-verify@f73af670bc516d6556a0203315b90c0c6554852f
+        with:
+          tag: ${{ inputs.tag || github.ref_name }}
+          required-checks: |
+            Lint, types and tests
+            Conformance (
+            Fuzz (
+
+      - name: The version and the specification in pyproject.toml
         env:
-          TAG: ${{ github.ref_name }}
+          BASE: ${{ steps.verify.outputs.base }}
+          KIND: ${{ steps.verify.outputs.kind }}
         run: |
           set -euo pipefail
-          base=$(bash .github/scripts/release-base.sh "$TAG" "$GITHUB_SHA")
-          version="${TAG#v}"
-          project=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')
-          if [ "$project" != "$version" ]; then
-            echo "::error::pyproject.toml has version '$project', the tag $version"; exit 1
-          fi
-          prerelease=false
-          if [[ "$version" == *-* ]]; then prerelease=true; fi
-          { echo "base=$base"; echo "version=$version"; echo "prerelease=$prerelease"; } >> "$GITHUB_OUTPUT"
-
-      # The branches take squash-merged pull requests; their checks ran on the pull request's
-      # head.
-      - name: The pull request's checks passed
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BASE: ${{ steps.version.outputs.base }}
-        run: |
-          set -euo pipefail
-          heads=$(gh pr list --repo "$GITHUB_REPOSITORY" --base "$BASE" --state merged --limit 200 \
-            --json headRefOid,mergeCommit \
-            --jq "[.[] | select(.mergeCommit.oid == \"$GITHUB_SHA\") | .headRefOid] | unique | .[]")
-          if [ "$(printf '%s\n' "$heads" | grep -c .)" != 1 ]; then
-            echo "::error::$GITHUB_SHA did not come from exactly one merged pull request into $BASE"; exit 1
-          fi
-          runs=$(gh api "repos/$GITHUB_REPOSITORY/commits/$heads/check-runs?per_page=100" \
-            --jq '.check_runs[] | "\(.status)|\(.conclusion)|\(.name)"')
-          printf '%s\n' "$runs"
-          for required in "Lint, types and tests" "Conformance (" "Fuzz ("; do
-            grep -qF "|$required" <<< "$runs" || { echo "::error::check '$required' did not run"; exit 1; }
-          done
-          if grep -vE '^completed\|(success|skipped|neutral)\|' <<< "$runs"; then
-            echo "::error::not every check of the pull request passed"; exit 1
-          fi
-
-      - name: Not released yet
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            echo "::error::release $TAG exists already"; exit 1
-          fi
+          python3 - <<'PY'
+          import os, re, sys, tomllib
+          project = tomllib.load(open("pyproject.toml", "rb"))
+          version, spec = project["project"]["version"], project["tool"]["home-mandate"]["spec"]
+          errors = []
+          if version != os.environ["BASE"]:
+              errors.append(f"pyproject.toml has version {version}, the tag {os.environ['BASE']}")
+          if not re.fullmatch(r"v\d+\.\d+\.\d+(-(alpha|rc)\.\d+)?", spec):
+              errors.append(f"[tool.home-mandate] spec is not a tag: {spec}")
+          # What becomes a version names versions (RELEASING.md, "Releases that depend on each other").
+          elif os.environ["KIND"] == "version" and "-" in spec:
+              errors.append(f"a version must name a version of the specification, not {spec}")
+          for error in errors:
+              print(f"::error::{error}")
+          sys.exit(1 if errors else 0)
+          PY
 
   conformance:
     name: Conformance report
     needs: verify
+    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -159,3 +163,60 @@ jobs:
           args=(--repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes --verify-tag)
           if [ "$PRERELEASE" = "true" ]; then args+=(--prerelease); fi
           gh release create "$TAG" conformance-report.json "${args[@]}"
+
+  # The release gate, for a release candidate only: what is too long for every pull request.
+  # Every target with the profile "long" (tests/fuzz/conftest.py), starting from the examples
+  # the runs of scheduled.yml have kept. Until tests/fuzz/ has targets there is nothing to run;
+  # the job says so and passes, like "Fuzz (short)" of the pull requests.
+  fuzz:
+    name: Fuzz (long)
+    needs: [verify, publish]
+    if: needs.verify.outputs.kind == 'rc'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -e ".[dev]"
+      # The key never matches: the newest examples with the prefix are restored.
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .hypothesis/
+          key: hypothesis-v1-${{ github.run_id }}
+          restore-keys: hypothesis-v1-
+      - name: Fuzz targets present
+        id: targets
+        run: |
+          if ls tests/fuzz/test_*.py > /dev/null 2>&1; then echo "present=true" >> "$GITHUB_OUTPUT"
+          else echo "::warning::tests/fuzz/ has no targets yet"; fi
+      - if: steps.targets.outputs.present == 'true'
+        run: pytest tests/fuzz
+        env:
+          HYPOTHESIS_PROFILE: long
+      # A failing example is kept in .hypothesis/ with its seed; keep it to reproduce.
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-failures
+          path: .hypothesis/
+          if-no-files-found: ignore
+          include-hidden-files: true
+
+  # The job release-verify looks for before a version may stand on this commit: it succeeds
+  # only if the release candidate was published and every part of the gate passed.
+  gate:
+    name: Release gate
+    needs: [verify, publish, fuzz]
+    if: always() && github.event_name == 'push' && needs.verify.outputs.kind == 'rc'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "verify, publish, fuzz: $RESULTS"
+          [ "$RESULTS" = "success success success" ]

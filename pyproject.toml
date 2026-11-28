@@ -22,7 +22,7 @@ Homepage = "https://home-mandate.org/"
 # conformance classes it claims (SPEC-v0 section 8.1). The workflows run the test tool
 # of exactly this tag against these classes; add a class here once it passes.
 [tool.home-mandate]
-spec = "v0.1.0"
+spec = "v0.2.0"
 classes = "evaluator"
 
 [tool.hatch.build.targets.wheel]

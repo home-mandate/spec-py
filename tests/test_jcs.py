@@ -206,3 +206,27 @@ def test_a_name_that_is_not_a_string() -> None:
 def test_lone_surrogate() -> None:
     with pytest.raises(JCSError, match="surrogate"):
         canonicalize(["\ud800"])
+
+
+def test_the_sorting_example_of_rfc_8785() -> None:
+    # RFC 8785 section 3.2.3: the property names of its example, in the order it requires.
+    # Built with chr() so the file stays ASCII.
+    names = {
+        chr(0x20AC): "Euro Sign",
+        chr(0x0D): "Carriage Return",
+        chr(0xFB33): "Hebrew Letter Dalet With Dagesh",
+        "1": "One",
+        chr(0x1F600): "Emoji: Grinning Face",
+        chr(0x80): "Control",
+        chr(0xF6): "Latin Small Letter O With Diaeresis",
+    }
+    value = parse(json.dumps(names))
+    expected = (
+        '{"\\r":"Carriage Return","1":"One",'
+        f'"{chr(0x80)}":"Control",'
+        f'"{chr(0xF6)}":"Latin Small Letter O With Diaeresis",'
+        f'"{chr(0x20AC)}":"Euro Sign",'
+        f'"{chr(0x1F600)}":"Emoji: Grinning Face",'
+        f'"{chr(0xFB33)}":"Hebrew Letter Dalet With Dagesh"}}'
+    )
+    assert canonicalize(value).decode("utf-8") == expected
